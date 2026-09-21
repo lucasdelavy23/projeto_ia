@@ -65,15 +65,20 @@ não funciona**. Para administrar o banco use o **MySQL Workbench**
 
 ```
 projeto_ia/                        <- DocumentRoot do Apache (http://localhost/)
-├── index.php                      <- Painel administrativo (layout + menu + cards)
-├── clientes/index.php             <- Stub: apenas echo 'Clientes'
-├── produtos/index.php             <- Stub: apenas echo 'Produtos'
-├── pedidos/index.php              <- Stub: apenas echo 'Pedidos'
+├── index.php                      <- Dashboard: só o conteúdo do <main> + includes
+├── clientes/index.php             <- Página de clientes (usa os fragmentos)
+├── produtos/index.php             <- Página de produtos (usa os fragmentos)
+├── pedidos/index.php              <- Página de pedidos (usa os fragmentos)
 ├── sql/
 │   ├── 001_create.sql             <- DDL: cria o banco e as 4 tabelas
 │   ├── 002_insert.sql             <- Dados de exemplo (carga inicial)
 │   └── 003_select.sql             <- Consultas de exemplo
-├── src/assets/css/app.css         <- CSS global (importa Bootstrap + Font Awesome)
+├── src/
+│   ├── assets/css/app.css         <- CSS global (importa Bootstrap + Font Awesome)
+│   └── includes/                  <- Fragmentos de layout reutilizados por todas as páginas
+│       ├── head.php               <- <!doctype html> até </header> (define $pagina)
+│       ├── aside.php              <- .container-fluid até a abertura de <main>
+│       └── footer.php             <- fechamento de </main> até </html>
 ├── AGENTS.md                      <- Este arquivo
 └── README.md
 ```
@@ -187,24 +192,54 @@ Envolvida em `START TRANSACTION` / `COMMIT`, com **IDs explícitos**.
 
 ---
 
-## 6. Roteamento
+## 6. Layout, fragmentos e roteamento
+
+### 6.1 Fragmentos de layout (`src/includes/`)
+
+Todas as páginas do sistema são montadas com **3 fragmentos reutilizáveis**. Cada página
+fornece **apenas o HTML interno do `<main>`**:
+
+| Arquivo | Conteúdo |
+|---|---|
+| `src/includes/head.php` | do `<?php $pagina = ...` até o `</header>` |
+| `src/includes/aside.php` | de `<div class="container-fluid">` até a abertura de `<main ...>` |
+| `src/includes/footer.php` | fechamento de `</main>`, os `</div>`, o `<script>` do Bootstrap e `</body></html>` |
+
+Padrão de uso (exemplo de `clientes/index.php`):
+
+```php
+<?php $pagina = 'clientes'; ?>
+<?php require __DIR__ . '/../src/includes/head.php'; ?>
+<?php require __DIR__ . '/../src/includes/aside.php'; ?>
+
+				<div class="mb-4">
+					<h1 class="h3 mb-1">Clientes</h1>
+				</div>
+
+<?php require __DIR__ . '/../src/includes/footer.php'; ?>
+```
+
+- O `head.php` define `$pagina` com *guard*: `$pagina = $pagina ?? ($_GET['pagina'] ?? 'inicio')`.
+  A raiz usa a query string; os módulos apenas declaram `$pagina = 'clientes'` (etc.) antes do include.
+- **Não** duplique `<!doctype>`, `<header>`, `<aside>` ou `<main>` nas páginas novas: use os fragmentos.
+- **Caminhos absolutos do site.** Nos fragmentos os links partem da raiz
+  (`/src/assets/css/app.css`, `/index.php?pagina=...`) para funcionarem igual na raiz e
+  dentro de `/clientes/`, `/produtos/` e `/pedidos/`.
+
+### 6.2 Roteamento
 
 O `index.php` da raiz é um front controller simples baseado em *query string*:
 
-```php
-<?php $pagina = $_GET['pagina'] ?? 'inicio'; ?>
-```
-
-- Página padrão: `inicio`.
-- O menu usa `?pagina=inicio|clientes|produtos|pedidos` e marca o item ativo com:
+- Página padrão: `inicio` — `$pagina` vem de `$_GET['pagina']`, tratado dentro do `head.php`.
+- O menu usa `/index.php?pagina=inicio|clientes|produtos|pedidos` e marca o item ativo com:
 
 ```php
 class="nav-link <?= $pagina === 'clientes' ? 'active' : 'text-dark' ?>"
 ```
 
-- As pastas `clientes/`, `produtos/` e `pedidos/` possuem seus próprios `index.php`,
-  mas **ainda não estão ligadas** ao front controller (os links do menu apontam para
-  `?pagina=...`, não para `/clientes/`, `/produtos/`, `/pedidos/`).
+- As pastas `clientes/`, `produtos/` e `pedidos/` **já são páginas completas** montadas com
+  os fragmentos, mas o menu ainda aponta para `?pagina=...` (que renderiza o dashboard da
+  raiz). Ligar `?pagina=clientes` → `/clientes/` continua pendente.
 - Não há `.htaccess` nem rotas amigáveis.
 
 ---
@@ -270,8 +305,10 @@ git push origin main
    invente valores nem versione credenciais; se precisar de um arquivo de config,
    mantenha-o fora do Git.
 8. **`src/assets/css/app.css` é o único ponto de CSS.** Não espalhe estilos pelo HTML.
-9. **`README.md` está com codificação irregular** (UTF-16 / caracteres nulos). Evite
-   reescrevê-lo às cegas; prefira editar/recriar com cuidado ou pedir confirmação.
+9. **Use caminhos absolutos do site nos fragmentos.** `/src/...` e `/index.php?...` funcionam
+   tanto na raiz quanto em `/clientes/`; caminhos relativos quebram nos módulos.
+10. **`README.md` está com codificação irregular** (UTF-16 / caracteres nulos). Evite
+    reescrevê-lo às cegas; prefira editar/recriar com cuidado ou pedir confirmação.
 
 ---
 
@@ -280,6 +317,7 @@ git push origin main
 **Concluído**
 
 - [x] Layout do painel administrativo (`index.php`)
+- [x] Layout desmembrado em fragmentos reutilizáveis (`src/includes/`)
 - [x] CSS centralizado em `src/assets/css/app.css`
 - [x] Modelagem do banco (`sql/001_create.sql`)
 - [x] Massa de dados de exemplo (`sql/002_insert.sql`)
