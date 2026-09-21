@@ -223,23 +223,25 @@ Padrão de uso (exemplo de `clientes/index.php`):
   A raiz usa a query string; os módulos apenas declaram `$pagina = 'clientes'` (etc.) antes do include.
 - **Não** duplique `<!doctype>`, `<header>`, `<aside>` ou `<main>` nas páginas novas: use os fragmentos.
 - **Caminhos absolutos do site.** Nos fragmentos os links partem da raiz
-  (`/src/assets/css/app.css`, `/index.php?pagina=...`) para funcionarem igual na raiz e
-  dentro de `/clientes/`, `/produtos/` e `/pedidos/`.
+  (`/src/assets/css/app.css`, `/index.php?pagina=inicio`, `/clientes/`) para funcionarem
+  igual na raiz e dentro de `/clientes/`, `/produtos/` e `/pedidos/`.
 
 ### 6.2 Roteamento
 
-O `index.php` da raiz é um front controller simples baseado em *query string*:
+O `index.php` da raiz é o **dashboard**, um front controller simples baseado em *query string*:
 
 - Página padrão: `inicio` — `$pagina` vem de `$_GET['pagina']`, tratado dentro do `head.php`.
-- O menu usa `/index.php?pagina=inicio|clientes|produtos|pedidos` e marca o item ativo com:
+- O menu (`aside.php`) aponta para as **páginas reais**: `/index.php?pagina=inicio` (dashboard),
+  `/clientes/`, `/produtos/` e `/pedidos/`. Cada item marca o ativo comparando `$pagina`:
 
 ```php
 class="nav-link <?= $pagina === 'clientes' ? 'active' : 'text-dark' ?>"
 ```
 
-- As pastas `clientes/`, `produtos/` e `pedidos/` **já são páginas completas** montadas com
-  os fragmentos, mas o menu ainda aponta para `?pagina=...` (que renderiza o dashboard da
-  raiz). Ligar `?pagina=clientes` → `/clientes/` continua pendente.
+- Os valores possíveis de `$pagina` são `inicio` (raiz), `clientes`, `produtos` e `pedidos`
+  — os três últimos declarados no topo do `index.php` de cada módulo.
+- A query string `?pagina=` serve apenas para o dashboard da raiz; os módulos são acessados
+  diretamente pela própria pasta (`/clientes/`, `/produtos/`, `/pedidos/`).
 - Não há `.htaccess` nem rotas amigáveis.
 
 ---
@@ -322,6 +324,7 @@ git push origin main
 - [x] Modelagem do banco (`sql/001_create.sql`)
 - [x] Massa de dados de exemplo (`sql/002_insert.sql`)
 - [x] Consultas de exemplo (`sql/003_select.sql`)
+- [x] Ligar as pastas `clientes/`, `produtos/` e `pedidos/` ao menu (links diretos)
 
 **Pendente / candidatos naturais**
 
@@ -329,7 +332,6 @@ git push origin main
 - [ ] CRUD de clientes, produtos e pedidos
 - [ ] Substituir os números fixos dos cards de indicadores por dados reais
 - [ ] Autenticação (login e ação "Sair")
-- [ ] Ligar as pastas `clientes/`, `produtos/` e `pedidos/` ao roteamento
 - [ ] Paginação e filtros nas listagens
 
 ---
