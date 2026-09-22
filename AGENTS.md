@@ -68,8 +68,10 @@ projeto_ia/                        <- DocumentRoot do Apache (http://localhost/)
 ├── index.php                      <- Dashboard: só o conteúdo do <main> + includes
 ├── clientes/                      <- Módulo de clientes (padrão pages/ + partials/)
 │   ├── index.php                  <- Front controller: página inteira x parcial (?partial=)
-│   ├── pages/index.php            <- A página (HTML interno do <main> + alvo do htmx)
-│   └── partials/table.php         <- Parcial com a tabela de clientes (resposta do htmx)
+│   ├── pages/index.php            <- A página (HTML interno do <main> + modal + alvo do htmx)
+│   ├── partials/table.php         <- Parcial com a tabela de clientes (resposta do htmx)
+│   ├── partials/form.php          <- Parcial com o formulário do modal de inclusão
+│   └── partials/save.php          <- Parcial que processa o POST de inclusão (?partial=save)
 ├── produtos/index.php             <- Página de produtos (usa os fragmentos)
 ├── pedidos/index.php              <- Página de pedidos (usa os fragmentos)
 ├── sql/
@@ -78,6 +80,7 @@ projeto_ia/                        <- DocumentRoot do Apache (http://localhost/)
 │   └── 003_select.sql             <- Consultas de exemplo
 ├── src/
 │   ├── assets/css/app.css         <- CSS global (importa Bootstrap + Font Awesome)
+│   ├── assets/js/app.js           <- JS global (regras de modal + integração htmx/Bootstrap)
 │   ├── config/bd.local.php        <- Credenciais locais do banco (NÃO versionado)
 │   └── includes/                  <- Fragmentos de layout reutilizados por todas as páginas
 │       ├── head.php               <- <!doctype html> até </header> (define $pagina + htmx)
@@ -199,6 +202,10 @@ Envolvida em `START TRANSACTION` / `COMMIT`, com **IDs explícitos**.
   desse arquivo** via `@import url(...)`, e o `index.php` referencia **somente**
   `src/assets/css/app.css`. **Não** adicione `<link>` de CDN direto no HTML.
 - Ícones: Font Awesome (`<i class="fa-solid fa-users fa-fw me-2"></i>`).
+- Todo **JavaScript global** fica em `src/assets/js/app.js`, o único `<script>` local
+  incluído por `src/includes/footer.php` (com `defer`, para rodar depois do Bootstrap e do
+  htmx). **Não** espalhe `<script>` pelas páginas: use os eventos do htmx (`HX-Trigger`) e
+  o `data-bs-*` do Bootstrap como ganchos.
 - Layout: `navbar` no topo, `aside` com `nav-pills` à esquerda, `main` com `card` /
   `shadow-sm` para os blocos.
 
@@ -215,7 +222,7 @@ fornece **apenas o HTML interno do `<main>`**:
 |---|---|
 | `src/includes/head.php` | do `<?php $pagina = ...` até o `</header>` |
 | `src/includes/aside.php` | de `<div class="container-fluid">` até a abertura de `<main ...>` |
-| `src/includes/footer.php` | fechamento de `</main>`, os `</div>`, o `<script>` do Bootstrap e `</body></html>` |
+| `src/includes/footer.php` | fechamento de `</main>`, os `</div>`, os `<script>` (Bootstrap e `app.js`) e `</body></html>` |
 
 Padrão de uso (exemplo de `clientes/index.php`):
 
@@ -265,6 +272,8 @@ O módulo `clientes` é o **modelo de referência** para páginas que carregam d
 | `clientes/index.php` | **Front controller**. Se vier `?partial=<nome>` e o nome estiver na *lista branca* (`$partialsPermitidos`), devolve **só o parcial**; caso contrário, a página completa. |
 | `clientes/pages/index.php` | A página: `$pagina = 'clientes'`, os 3 fragmentos de layout e o **alvo do htmx**. |
 | `clientes/partials/table.php` | Resposta do htmx: `require_once` do `bd.php`, a consulta e a tabela (só o fragmento, **nunca** `<!doctype>`). |
+| `clientes/partials/form.php` | Formulário do modal de inclusão (campos, `is-invalid` + `invalid-feedback` e o próprio `<form hx-post="/clientes/?partial=save">`). É incluído pela página **e** devolvido pelo `save.php`. |
+| `clientes/partials/save.php` | Processa o `POST` de inclusão: valida, normaliza, grava e devolve o formulário (limpo no sucesso, com os erros e os valores digitados no insucesso). |
 
 O carregamento é disparado pelo próprio elemento alvo da página:
 
@@ -283,6 +292,30 @@ O carregamento é disparado pelo próprio elemento alvo da página:
 - O parcial também responde em `/clientes/partials/table.php` (acesso direto), porque o
   `require_once` usa `__DIR__`.
 - **Sempre** `htmlspecialchars()` na saída de dados vindos do banco.
+
+### 6.4 Modal de inclusão de cliente (`?partial=save`)
+
+Fluxo de referência para os próximos módulos com formulário em modal:
+
+1. `clientes/pages/index.php` traz o botão `data-bs-toggle="modal"` (`data-bs-target="#modal-cliente"`)
+   e o *shell* do modal; o `partials/form.php` é incluído **pela página** (sem requisição extra).
+2. O `<form id="form-cliente">` usa `hx-post="/clientes/?partial=save"`, `hx-target="this"`,
+   `hx-swap="outerHTML"` (troca só o formulário, preservando o `.modal-header`) e
+   `hx-disabled-elt="find button[type='submit']"` (evita clique duplo).
+3. `partials/save.php` responde **sempre com o formulário** e **HTTP 200** — o htmx só faz
+   *swap* em respostas 2xx, e é o *swap* que devolve os erros ao modal. No sucesso envia o
+   header `HX-Trigger: clienteSalvo`; no insucesso devolve os valores digitados com
+   `is-invalid` + `invalid-feedback` e **sem** o header. `GET` nesse endereço devolve 405.
+4. `src/assets/js/app.js` escuta `clienteSalvo` para **fechar o modal** (`bootstrap.Modal`) e
+   **recarregar a listagem** (`htmx.ajax` reaproveitando o `hx-get` de `#tabela-clientes`),
+   limpa o formulário no `hidden.bs.modal` e reexibe os avisos nativos de validação HTML5
+   (o htmx não envia formulário inválido, mas não mostra o motivo por padrão).
+5. O CPF é normalizado para `000.000.000-00` e o telefone para `(00) 00000-0000`, no mesmo
+   padrão da massa de `sql/002_insert.sql`; a unicidade de `cpf`/`email` é conferida antes do
+   `INSERT` (com *fallback* para o erro `23000` do MySQL). `dataCadastro` não é enviado —
+   o banco usa `DEFAULT CURRENT_TIMESTAMP`.
+6. **Pendência conhecida**: o `save.php` ainda não tem proteção CSRF (*token*/sessão), porque
+   o sistema ainda não tem autenticação. Adicione o *token* junto com o login.
 
 ---
 
@@ -347,7 +380,8 @@ git push origin main
    em `src/config/bd.local.php`, que é ignorado pelo `.gitignore`. Se esse arquivo não
    existir, o `bd.php` usa o padrão de fallback e a conexão pode falhar. Não invente valores
    nem versione credenciais (nem neste AGENTS.md, nem em scripts de exemplo).
-8. **`src/assets/css/app.css` é o único ponto de CSS.** Não espalhe estilos pelo HTML.
+8. **`src/assets/css/app.css` é o único ponto de CSS** e **`src/assets/js/app.js` é o único
+   ponto de JS** (incluído por `footer.php`). Não espalhe estilos nem `<script>` pelo HTML.
 9. **Use caminhos absolutos do site nos fragmentos.** `/src/...` e `/index.php?...` funcionam
    tanto na raiz quanto em `/clientes/`; caminhos relativos quebram nos módulos.
 10. **`README.md` está com codificação irregular** (UTF-16 / caracteres nulos). Evite
@@ -369,10 +403,13 @@ git push origin main
 - [x] Camada de conexão com o banco (PDO) reutilizável (`src/includes/bd.php`)
 - [x] Dependência do htmx incluída globalmente (`src/includes/head.php`)
 - [x] Módulo `clientes` com `pages/` + `partials/` e listagem via htmx
+- [x] Modal de inclusão de cliente (`partials/form.php` + `partials/save.php`) com recarga da
+      listagem e fechamento do modal via `src/assets/js/app.js`
 
 **Pendente / candidatos naturais**
 
-- [ ] CRUD de clientes, produtos e pedidos
+- [ ] CRUD de clientes, produtos e pedidos (edição, exclusão e detalhes)
+- [ ] Proteção CSRF nos POSTs (junto com a autenticação)
 - [ ] Aplicar o mesmo padrão `pages/` + `partials/` em `produtos` e `pedidos`
 - [ ] Substituir os números fixos dos cards de indicadores por dados reais
 - [ ] Autenticação (login e ação "Sair")
