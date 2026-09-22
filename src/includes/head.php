@@ -6,6 +6,7 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Painel administrativo</title>
 	<link href="/src/assets/css/app.css" rel="stylesheet">
+	<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
 </head>
 <body class="bg-light">
 	<header class="navbar navbar-expand bg-white border-bottom shadow-sm px-3 px-md-4">

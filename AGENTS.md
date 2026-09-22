@@ -11,10 +11,10 @@ Sistema de **painel administrativo** de uma **loja de vestuário**, desenvolvido
 **PHP puro** (sem framework e sem Composer) com **MySQL** e interface em **Bootstrap 5**.
 
 Estado atual: **projeto em estágio inicial**. O `index.php` da raiz já contém o layout
-completo do painel administrativo (header, menu lateral e cards de indicadores), mas as
-páginas internas (`clientes`, `produtos`, `pedidos`) são apenas *stubs* que imprimem texto.
-Ainda **não existe nenhuma conexão com banco de dados no PHP** — não há camada de acesso a
-dados, CRUD, autenticação nem templates.
+completo do painel administrativo (header, menu lateral e cards de indicadores). O módulo
+`clientes` já carrega dados reais do banco (`cliente`) com **htmx**, no padrão `pages/` +
+`partials/`; `produtos` e `pedidos` ainda são *stubs* que imprimem texto. A camada de
+conexão (`src/includes/bd.php`, PDO) já existe, mas **não há** CRUD, autenticação nem templates.
 
 ---
 
@@ -66,7 +66,10 @@ não funciona**. Para administrar o banco use o **MySQL Workbench**
 ```
 projeto_ia/                        <- DocumentRoot do Apache (http://localhost/)
 ├── index.php                      <- Dashboard: só o conteúdo do <main> + includes
-├── clientes/index.php             <- Página de clientes (usa os fragmentos)
+├── clientes/                      <- Módulo de clientes (padrão pages/ + partials/)
+│   ├── index.php                  <- Front controller: página inteira x parcial (?partial=)
+│   ├── pages/index.php            <- A página (HTML interno do <main> + alvo do htmx)
+│   └── partials/table.php         <- Parcial com a tabela de clientes (resposta do htmx)
 ├── produtos/index.php             <- Página de produtos (usa os fragmentos)
 ├── pedidos/index.php              <- Página de pedidos (usa os fragmentos)
 ├── sql/
@@ -75,10 +78,13 @@ projeto_ia/                        <- DocumentRoot do Apache (http://localhost/)
 │   └── 003_select.sql             <- Consultas de exemplo
 ├── src/
 │   ├── assets/css/app.css         <- CSS global (importa Bootstrap + Font Awesome)
+│   ├── config/bd.local.php        <- Credenciais locais do banco (NÃO versionado)
 │   └── includes/                  <- Fragmentos de layout reutilizados por todas as páginas
-│       ├── head.php               <- <!doctype html> até </header> (define $pagina)
+│       ├── head.php               <- <!doctype html> até </header> (define $pagina + htmx)
 │       ├── aside.php              <- .container-fluid até a abertura de <main>
-│       └── footer.php             <- fechamento de </main> até </html>
+│       ├── footer.php             <- fechamento de </main> até </html>
+│       └── bd.php                 <- Conexão PDO reutilizável (função bd())
+├── .gitignore                     <- Ignora src/config/bd.local.php
 ├── AGENTS.md                      <- Este arquivo
 └── README.md
 ```
@@ -161,9 +167,13 @@ Envolvida em `START TRANSACTION` / `COMMIT`, com **IDs explícitos**.
 - Indentação com **TAB** (como no `index.php`).
 - Arquivos iniciam com `<?php` e usam *short echo tags* (`<?= ... ?>`) no HTML.
 - Interface e textos em **pt-BR** (`<html lang="pt-BR">`).
-- **Não existe** camada de conexão/banco ainda. Se criar uma, adote um único padrão
-  (sugestão: `src/config/database.php` com **PDO** + `try/catch` em `PDOException`),
-  reutilize em todas as páginas e documente aqui.
+- **Conexão com o banco**: sempre `require_once __DIR__ . '/../src/includes/bd.php';` e a
+  função `bd()`, que devolve um **PDO** singleton (`ERRMODE_EXCEPTION`, `FETCH_ASSOC`,
+  `EMULATE_PREPARES` desligado, `charset=utf8mb4`) com `try/catch` em `PDOException`.
+  Nunca espalhe `new PDO(...)` pelas páginas.
+- **Credenciais**: ficam em `src/config/bd.local.php`, que está no `.gitignore`. O `bd.php`
+  carrega esse arquivo se ele existir e traz apenas o padrão de fallback. **Nunca** versione
+  senhas — nem neste AGENTS.md.
 
 ### SQL
 - Palavras-chave em **MAIÚSCULAS** (`CREATE TABLE`, `NOT NULL`, `DEFAULT`, `INNER JOIN`).
@@ -182,7 +192,9 @@ Envolvida em `START TRANSACTION` / `COMMIT`, com **IDs explícitos**.
 ```
 
 ### Front-end
-- **Bootstrap 5.3.3** + **Font Awesome 6.5.2**.
+- **Bootstrap 5.3.3** + **Font Awesome 6.5.2** + **htmx 2.0.4**.
+- O **htmx** é carregado por `<script>` com `defer` dentro de `src/includes/head.php`, logo
+  está disponível em todas as páginas. A listagem de clientes usa `hx-get` + `hx-trigger`.
 - Todo CSS global fica em **`src/assets/css/app.css`**. Os CDNs são importados **dentro
   desse arquivo** via `@import url(...)`, e o `index.php` referencia **somente**
   `src/assets/css/app.css`. **Não** adicione `<link>` de CDN direto no HTML.
@@ -244,6 +256,34 @@ class="nav-link <?= $pagina === 'clientes' ? 'active' : 'text-dark' ?>"
   diretamente pela própria pasta (`/clientes/`, `/produtos/`, `/pedidos/`).
 - Não há `.htaccess` nem rotas amigáveis.
 
+### 6.3 Padrão de módulo com htmx (`clientes/`)
+
+O módulo `clientes` é o **modelo de referência** para páginas que carregam dados do banco:
+
+| Arquivo | Papel |
+|---|---|
+| `clientes/index.php` | **Front controller**. Se vier `?partial=<nome>` e o nome estiver na *lista branca* (`$partialsPermitidos`), devolve **só o parcial**; caso contrário, a página completa. |
+| `clientes/pages/index.php` | A página: `$pagina = 'clientes'`, os 3 fragmentos de layout e o **alvo do htmx**. |
+| `clientes/partials/table.php` | Resposta do htmx: `require_once` do `bd.php`, a consulta e a tabela (só o fragmento, **nunca** `<!doctype>`). |
+
+O carregamento é disparado pelo próprio elemento alvo da página:
+
+```html
+<div id="tabela-clientes" class="card border-0 shadow-sm"
+		hx-get="/clientes/?partial=table"
+		hx-trigger="load"
+		hx-target="this"
+		hx-swap="innerHTML">
+```
+
+- O conteúdo inicial desse `div` é o *spinner* ("Carregando clientes..."), substituído pela
+  tabela quando o htmx recebe a resposta; não é preciso CSS adicional no `app.css`.
+- **Lista branca obrigatória**: todo parcial novo precisa entrar em `$partialsPermitidos` no
+  front controller do módulo (impede *path traversal* via `?partial=`).
+- O parcial também responde em `/clientes/partials/table.php` (acesso direto), porque o
+  `require_once` usa `__DIR__`.
+- **Sempre** `htmlspecialchars()` na saída de dados vindos do banco.
+
 ---
 
 ## 7. Comandos úteis
@@ -303,9 +343,10 @@ git push origin main
 6. **Sincronização do OneDrive.** A pasta está dentro do OneDrive, que pode travar
    arquivos durante a sincronização. Se um arquivo aparecer bloqueado, aguarde a
    sincronização em vez de forçar.
-7. **Credenciais não versionadas.** A senha do `root` **não** está no repositório. Não
-   invente valores nem versione credenciais; se precisar de um arquivo de config,
-   mantenha-o fora do Git.
+7. **Credenciais não versionadas.** A senha do `root` **não** está no repositório: ela vive
+   em `src/config/bd.local.php`, que é ignorado pelo `.gitignore`. Se esse arquivo não
+   existir, o `bd.php` usa o padrão de fallback e a conexão pode falhar. Não invente valores
+   nem versione credenciais (nem neste AGENTS.md, nem em scripts de exemplo).
 8. **`src/assets/css/app.css` é o único ponto de CSS.** Não espalhe estilos pelo HTML.
 9. **Use caminhos absolutos do site nos fragmentos.** `/src/...` e `/index.php?...` funcionam
    tanto na raiz quanto em `/clientes/`; caminhos relativos quebram nos módulos.
@@ -325,11 +366,14 @@ git push origin main
 - [x] Massa de dados de exemplo (`sql/002_insert.sql`)
 - [x] Consultas de exemplo (`sql/003_select.sql`)
 - [x] Ligar as pastas `clientes/`, `produtos/` e `pedidos/` ao menu (links diretos)
+- [x] Camada de conexão com o banco (PDO) reutilizável (`src/includes/bd.php`)
+- [x] Dependência do htmx incluída globalmente (`src/includes/head.php`)
+- [x] Módulo `clientes` com `pages/` + `partials/` e listagem via htmx
 
 **Pendente / candidatos naturais**
 
-- [ ] Camada de conexão com o banco (PDO) reutilizável
 - [ ] CRUD de clientes, produtos e pedidos
+- [ ] Aplicar o mesmo padrão `pages/` + `partials/` em `produtos` e `pedidos`
 - [ ] Substituir os números fixos dos cards de indicadores por dados reais
 - [ ] Autenticação (login e ação "Sair")
 - [ ] Paginação e filtros nas listagens
